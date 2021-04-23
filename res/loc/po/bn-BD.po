@@ -4,16 +4,16 @@ msgstr ""
 "Report-Msgid-Bugs-To: pete@akeo.ie\n"
 "POT-Creation-Date: 2021-03-31 13:51+0100\n"
 "PO-Revision-Date: 2021-03-31 16:37+0100\n"
-"Language: fr_FR\n"
+"Language: bn_BD\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "X-Poedit-SourceCharset: UTF-8\n"
-"X-Rufus-LanguageName: French (Français)\n"
+"X-Rufus-LanguageName: Bengali (বাংলা)\n"
 "X-Rufus-LCID: 0x040c, 0x080c, 0x0c0c, 0x100c, 0x140c, 0x180c, 0x1c0c, 0x200c, 0x240c, 0x280c, 0x2c0c, 0x300c, 0x340c, 0x380c, 0xe40c\n"
 "Last-Translator: \n"
 "Language-Team: \n"
-"X-Generator: Poedit 2.4.2\n"
+"X-Generator: \n"
 
 #. • IDD_DIALOG → IDS_DRIVE_PROPERTIES_TXT
 msgid "Drive Properties"
@@ -21,7 +21,7 @@ msgstr "Options de Périphérique"
 
 #. • IDD_DIALOG → IDS_DEVICE_TXT
 msgid "Device"
-msgstr "Périphérique"
+msgstr "যন্ত্র"
 
 #. • IDD_DIALOG → IDS_BOOT_SELECTION_TXT
 msgid "Boot selection"
@@ -29,7 +29,7 @@ msgstr "Type de démarrage"
 
 #. • IDD_DIALOG → IDC_SELECT
 msgid "Select"
-msgstr "Sélection"
+msgstr "নির্বাচন"
 
 #. • IDD_DIALOG → IDS_IMAGE_OPTION_TXT
 msgid "Image Option"
