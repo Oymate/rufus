@@ -17,7 +17,7 @@ msgstr ""
 
 #. • IDD_DIALOG → IDS_DRIVE_PROPERTIES_TXT
 msgid "Drive Properties"
-msgstr "Options de Périphérique"
+msgstr "ড্রাইভের বৈশিষ্ট্য"
 
 #. • IDD_DIALOG → IDS_DEVICE_TXT
 msgid "Device"
@@ -25,7 +25,7 @@ msgstr "যন্ত্র"
 
 #. • IDD_DIALOG → IDS_BOOT_SELECTION_TXT
 msgid "Boot selection"
-msgstr "Type de démarrage"
+msgstr "বুট নির্বাচন"
 
 #. • IDD_DIALOG → IDC_SELECT
 msgid "Select"
@@ -33,19 +33,19 @@ msgstr "নির্বাচন"
 
 #. • IDD_DIALOG → IDS_IMAGE_OPTION_TXT
 msgid "Image Option"
-msgstr "Option d'image"
+msgstr "ছবির বহুনির্বাচন"
 
 #. • IDD_DIALOG → IDS_PARTITION_TYPE_TXT
 msgid "Partition scheme"
-msgstr "Schéma de partition"
+msgstr "বিভাগ(পার্টিশন) ধরণ"
 
 #. • IDD_DIALOG → IDS_TARGET_SYSTEM_TXT
 msgid "Target system"
-msgstr "Système de destination"
+msgstr "উদ্দীষ্ট ব্যবস্থা"
 
 #. • IDD_DIALOG → IDC_LIST_USB_HDD
 msgid "List USB Hard Drives"
-msgstr "Lister les disques durs USB"
+msgstr "তালিকা: ইউএসবি হার্ড ড্রাইভের"
 
 #. • IDD_DIALOG → IDC_OLD_BIOS_FIXES
 #.
@@ -60,15 +60,15 @@ msgstr "Ajouter les options de compatibilité pour vieux BIOS"
 #. Rufus can install it's own custom MBR (the Rufus MBR), which also allows users to
 #. specify a custom disk ID for the BIOS. The tooltip for this control is MSG_167.
 msgid "Use Rufus MBR with BIOS ID"
-msgstr "Utiliser le MBR Rufus avec ID"
+msgstr "বায়োস আইডি দিয়ে রুফুস এমবিআর ব্যবহার করুন"
 
 #. • IDD_DIALOG → IDS_FORMAT_OPTIONS_TXT
 msgid "Format Options"
-msgstr "Options de Formatage"
+msgstr "মুছার(ফরম্যাট) পছন্দসমূহ"
 
 #. • IDD_DIALOG → IDS_FILE_SYSTEM_TXT
 msgid "File system"
-msgstr "Système de fichiers"
+msgstr "ফাইল ব্যবস্থা"
 
 #. • IDD_DIALOG → IDS_CLUSTER_SIZE_TXT
 msgid "Cluster size"
