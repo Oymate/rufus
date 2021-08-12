@@ -1,7 +1,7 @@
 /*
  * Rufus: The Reliable USB Formatting Utility
  * ISO file extraction
- * Copyright © 2011-2020 Pete Batard <pete@akeo.ie>
+ * Copyright © 2011-2021 Pete Batard <pete@akeo.ie>
  * Based on libcdio's iso & udf samples:
  * Copyright © 2003-2014 Rocky Bernstein <rocky@gnu.org>
  *
@@ -353,7 +353,11 @@ static void fix_config(const char* psz_fullpath, const char* psz_path, const cha
 			if (props->is_grub_cfg) {
 				// Older versions of GRUB EFI used "linuxefi", newer just use "linux"
 				if ((replace_in_token_data(src, "linux", iso_label, usb_label, TRUE) != NULL) ||
-					(replace_in_token_data(src, "linuxefi", iso_label, usb_label, TRUE) != NULL)) {
+					(replace_in_token_data(src, "linuxefi", iso_label, usb_label, TRUE) != NULL) ||
+					// In their great wisdom, the openSUSE maintainers added a 'set linux=linux'
+					// line to their grub.cfg, which means that their kernel option token is no
+					// longer 'linux' but '$linux'... and we have to add a workaround for that.
+					(replace_in_token_data(src, "$linux", iso_label, usb_label, TRUE) != NULL)) {
 					uprintf("  Patched %s: '%s' ➔ '%s'\n", src, iso_label, usb_label);
 					modified = TRUE;
 				}
@@ -512,7 +516,7 @@ static int udf_extract_files(udf_t *p_udf, udf_dirent_t *p_udf_dirent, const cha
 				continue;
 			}
 			print_extracted_file(psz_fullpath, file_length);
-			for (i=0; i<NB_OLD_C32; i++) {
+			for (i = 0; i < NB_OLD_C32; i++) {
 				if (props.is_old_c32[i] && use_own_c32[i]) {
 					static_sprintf(tmp, "%s/syslinux-%s/%s", FILES_DIR, embedded_sl_version_str[0], old_c32_name[i]);
 					if (CopyFileU(tmp, psz_fullpath, FALSE)) {
@@ -869,7 +873,7 @@ BOOL ExtractISO(const char* src_iso, const char* dest_dir, BOOL scan)
 		PrintInfo(0, MSG_202);
 	} else {
 		uprintf("Extracting files...\n");
-		IGNORE_RETVAL(_chdirU(app_dir));
+		IGNORE_RETVAL(_chdirU(app_data_dir));
 		if (total_blocks == 0) {
 			uprintf("Error: ISO has not been properly scanned.\n");
 			FormatStatus = ERROR_SEVERITY_ERROR|FAC(FACILITY_STORAGE)|APPERR(ERROR_ISO_SCAN);
@@ -1522,9 +1526,11 @@ BOOL DumpFatDir(const char* path, int32_t cluster)
 				written = 0;
 				s = libfat_clustertosector(lf_fs, dirpos.cluster);
 				while ((s != 0) && (s < 0xFFFFFFFFULL) && (written < diritem.size)) {
+					buf = libfat_get_sector(lf_fs, s);
+					if (buf == NULL)
+						FormatStatus = ERROR_SEVERITY_ERROR | FAC(FACILITY_STORAGE) | ERROR_SECTOR_NOT_FOUND;
 					if (FormatStatus)
 						goto out;
-					buf = libfat_get_sector(lf_fs, s);
 					size = MIN(LIBFAT_SECTOR_SIZE, diritem.size - written);
 					if (!WriteFileWithRetry(handle, buf, size, &size, WRITE_RETRIES) ||
 						(size != MIN(LIBFAT_SECTOR_SIZE, diritem.size - written))) {

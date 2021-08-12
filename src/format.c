@@ -961,8 +961,7 @@ static BOOL WriteSBR(HANDLE hPhysicalDrive)
 	}
 
 	// Ensure that we have sufficient space for the SBR
-	max_size = IsChecked(IDC_OLD_BIOS_FIXES) ?
-		(DWORD)(SelectedDrive.SectorsPerTrack * SelectedDrive.SectorSize) : 1 * MB;
+	max_size = (DWORD)SelectedDrive.PartitionOffset[0];
 	if (br_size + size > max_size) {
 		uprintf("  SBR size is too large - You may need to uncheck 'Add fixes for old BIOSes'.");
 		if (sub_type == BT_MAX)
@@ -1059,6 +1058,10 @@ BOOL WritePBR(HANDLE hLogicalVolume)
 		// Note: NTFS requires a full remount after writing the PBR. We dismount when we lock
 		// and also go through a forced remount, so that shouldn't be an issue.
 		// But with NTFS, if you don't remount, you don't boot!
+		return TRUE;
+	case FS_EXT2:
+	case FS_EXT3:
+	case FS_EXT4:
 		return TRUE;
 	default:
 		uprintf("Unsupported FS for FS BR processing - aborting\n");
@@ -1323,7 +1326,7 @@ out:
 	return wintogo_index;
 }
 
-// http://technet.microsoft.com/en-ie/library/jj721578.aspx
+// https://docs.microsoft.com/en-us/previous-versions/windows/it-pro/windows-8.1-and-8/jj721578(v=ws.11)
 // As opposed to the technet guide above, we don't set internal drives offline,
 // due to people wondering why they can't see them by default and we also use
 // bcdedit rather than 'unattend.xml' to disable the recovery environment.
@@ -1546,9 +1549,8 @@ static BOOL WriteDrive(HANDLE hPhysicalDrive, BOOL bZeroDrive)
 				uprintfs("+");
 			}
 			// Don't overflow our projected size (mostly for VHDs)
-			if (wb + read_size[0] > target_size) {
+			if (wb + read_size[0] > target_size)
 				read_size[0] = (DWORD)(target_size - wb);
-			}
 
 			// WriteFile fails unless the size is a multiple of sector size
 			if (read_size[0] % SelectedDrive.SectorSize != 0)
@@ -1561,13 +1563,12 @@ static BOOL WriteDrive(HANDLE hPhysicalDrive, BOOL bZeroDrive)
 			if (throttle_fast_zeroing) {
 				throttle_fast_zeroing--;
 			} else if (fast_zeroing) {
-				assert(hSourceImage == NULL);	// Only enabled for zeroing
 				CHECK_FOR_USER_CANCEL;
 
 				// Read block and compare against the block that needs to be written
 				s = ReadFile(hPhysicalDrive, cmp_buffer, read_size[0], &comp_size, NULL);
 				if ((!s) || (comp_size != read_size[0])) {
-					uprintf("Read error: Could not read data for fast zeroing comparison - %s", WindowsErrorString());
+					uprintf("\r\nRead error: Could not read data for fast zeroing comparison - %s", WindowsErrorString());
 					goto out;
 				}
 
@@ -1587,7 +1588,7 @@ static BOOL WriteDrive(HANDLE hPhysicalDrive, BOOL bZeroDrive)
 				// Move the file pointer position back for writing
 				li.QuadPart = wb;
 				if (!SetFilePointerEx(hPhysicalDrive, li, NULL, FILE_BEGIN)) {
-					uprintf("Error: Could not reset position - %s", WindowsErrorString());
+					uprintf("\r\nError: Could not reset position - %s", WindowsErrorString());
 					goto out;
 				}
 				// Throttle read operations
@@ -1600,9 +1601,9 @@ static BOOL WriteDrive(HANDLE hPhysicalDrive, BOOL bZeroDrive)
 				if ((s) && (write_size == read_size[0]))
 					break;
 				if (s)
-					uprintf("Write error: Wrote %d bytes, expected %d bytes", write_size, read_size[0]);
+					uprintf("\r\nWrite error: Wrote %d bytes, expected %d bytes", write_size, read_size[0]);
 				else
-					uprintf("Write error at sector %lld: %s", wb / SelectedDrive.SectorSize, WindowsErrorString());
+					uprintf("\r\nWrite error at sector %lld: %s", wb / SelectedDrive.SectorSize, WindowsErrorString());
 				if (i < WRITE_RETRIES) {
 					li.QuadPart = wb;
 					uprintf("Retrying in %d seconds...", WRITE_TIMEOUT / 1000);
@@ -1640,6 +1641,7 @@ static BOOL WriteDrive(HANDLE hPhysicalDrive, BOOL bZeroDrive)
 		bled_init(_uprintf, NULL, sector_write, update_progress, NULL, &FormatStatus);
 		bled_ret = bled_uncompress_with_handles(hSourceImage, hPhysicalDrive, img_report.compression_type);
 		bled_exit();
+		uprintfs("\r\n");
 		if ((bled_ret >= 0) && (sec_buf_pos != 0)) {
 			// A disk image that doesn't end up on disk boundary should be a rare
 			// enough case, so we dont bother checking the write operation and
@@ -1690,7 +1692,7 @@ static BOOL WriteDrive(HANDLE hPhysicalDrive, BOOL bZeroDrive)
 			// 1. Wait for the current read operation to complete (and update the read size)
 			if ((!WaitFileAsync(hSourceImage, DRIVE_ACCESS_TIMEOUT)) ||
 				(!GetSizeAsync(hSourceImage, &read_size[read_bufnum]))) {
-				uprintf("Read error: %s", WindowsErrorString());
+				uprintf("\r\nRead error: %s", WindowsErrorString());
 				FormatStatus = ERROR_SEVERITY_ERROR | FAC(FACILITY_STORAGE) | ERROR_READ_FAULT;
 				goto out;
 			}
@@ -1718,9 +1720,9 @@ static BOOL WriteDrive(HANDLE hPhysicalDrive, BOOL bZeroDrive)
 				if ((s) && (write_size == read_size[proc_bufnum]))
 					break;
 				if (s)
-					uprintf("Write error: Wrote %d bytes, expected %d bytes", write_size, read_size[proc_bufnum]);
+					uprintf("\r\nWrite error: Wrote %d bytes, expected %d bytes", write_size, read_size[proc_bufnum]);
 				else
-					uprintf("Write error at sector %lld: %s", wb / SelectedDrive.SectorSize, WindowsErrorString());
+					uprintf("\r\nWrite error at sector %lld: %s", wb / SelectedDrive.SectorSize, WindowsErrorString());
 				if (i < WRITE_RETRIES) {
 					li.QuadPart = wb;
 					uprintf("Retrying in %d seconds...", WRITE_TIMEOUT / 1000);
@@ -1738,7 +1740,7 @@ static BOOL WriteDrive(HANDLE hPhysicalDrive, BOOL bZeroDrive)
 			if (i > WRITE_RETRIES)
 				goto out;
 		}
-		
+		uprintfs("\r\n");
 	}
 	RefreshDriveLayout(hPhysicalDrive);
 	ret = TRUE;
@@ -1963,15 +1965,21 @@ DWORD WINAPI FormatThread(void* param)
 	if ((boot_type == BT_IMAGE) && write_as_image) {
 		WriteDrive(hPhysicalDrive, FALSE);
 
-		// If the image contains a partition we might be able to access, try to re-mount it
-		safe_unlockclose(hPhysicalDrive);
-		safe_unlockclose(hLogicalVolume);
-		Sleep(200);
-		WaitForLogical(DriveIndex, 0);
-		if (GetDrivePartitionData(SelectedDrive.DeviceNumber, fs_name, sizeof(fs_name), TRUE)) {
-			volume_name = GetLogicalName(DriveIndex, 0, TRUE, TRUE);
-			if ((volume_name != NULL) && (MountVolume(drive_name, volume_name)))
-				uprintf("Remounted %s as %C:", volume_name, drive_name[0]);
+		// Trying to mount accessible partitions after writing an image leads to the
+		// creation of the infamous 'System Volume Information' folder on ESPs, which
+		// in turn leads to checksum errors for Ubuntu's boot/grub/efi.img (that maps
+		// to the Ubuntu ESP). So we only call the code below for Ventoy's vtsi images.
+		if (img_report.compression_type == BLED_COMPRESSION_VTSI) {
+			// If the image contains a partition we might be able to access, try to re-mount it
+			safe_unlockclose(hPhysicalDrive);
+			safe_unlockclose(hLogicalVolume);
+			Sleep(200);
+			WaitForLogical(DriveIndex, 0);
+			if (GetDrivePartitionData(SelectedDrive.DeviceNumber, fs_name, sizeof(fs_name), TRUE)) {
+				volume_name = GetLogicalName(DriveIndex, 0, TRUE, TRUE);
+				if ((volume_name != NULL) && (MountVolume(drive_name, volume_name)))
+					uprintf("Remounted %s as %C:", volume_name, drive_name[0]);
+			}
 		}
 		goto out;
 	}
@@ -2185,7 +2193,7 @@ DWORD WINAPI FormatThread(void* param)
 			}
 		} else if (boot_type == BT_GRUB4DOS) {
 			grub4dos_dst[0] = drive_name[0];
-			IGNORE_RETVAL(_chdirU(app_dir));
+			IGNORE_RETVAL(_chdirU(app_data_dir));
 			uprintf("Installing: %s (Grub4DOS loader) %s", grub4dos_dst,
 				IsFileInDB(FILES_DIR "\\grub4dos-" GRUB4DOS_VERSION "\\grldr")?"✓":"✗");
 			if (!CopyFileU(FILES_DIR "\\grub4dos-" GRUB4DOS_VERSION "\\grldr", grub4dos_dst, FALSE))

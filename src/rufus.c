@@ -44,15 +44,13 @@
 #include "localization.h"
 
 #include "ui.h"
+#include "re.h"
 #include "drive.h"
 #include "settings.h"
 #include "bled/bled.h"
 #include "cdio/logging.h"
 #include "../res/grub/grub_version.h"
 #include "../res/grub2/grub2_version.h"
-
-#define rufus    0
-#define appstore 1
 
 enum bootcheck_return {
 	BOOTCHECK_PROCEED = 0,
@@ -128,6 +126,7 @@ int dialog_showing = 0, selection_default = BT_IMAGE, persistence_unit_selection
 int default_fs, fs_type, boot_type, partition_type, target_type; // file system, boot type, partition type, target type
 int force_update = 0, default_thread_priority = THREAD_PRIORITY_ABOVE_NORMAL;
 char szFolderPath[MAX_PATH], app_dir[MAX_PATH], system_dir[MAX_PATH], temp_dir[MAX_PATH], sysnative_dir[MAX_PATH];
+char app_data_dir[MAX_PATH], user_dir[MAX_PATH];
 char embedded_sl_version_str[2][12] = { "?.??", "?.??" };
 char embedded_sl_version_ext[2][32];
 char ClusterSizeLabel[MAX_CLUSTER_SIZES][64];
@@ -136,7 +135,6 @@ char *archive_path = NULL, image_option_txt[128], *fido_url = NULL;
 StrArray DriveId, DriveName, DriveLabel, DriveHub, BlockingProcess, ImageList;
 // Number of steps for each FS for FCC_STRUCTURE_PROGRESS
 const int nb_steps[FS_MAX] = { 5, 5, 12, 1, 10, 1, 1, 1, 1 };
-const char* appstore_chunk[2] = { "\\WindowsApps\\19453.net.Rufus", "y8nh7bq2a8dtt\\rufus" };
 const char* flash_type[BADLOCKS_PATTERN_TYPES] = { "SLC", "MLC", "TLC" };
 
 // TODO: Remember to update copyright year in stdlg's AboutCallback() WM_INITDIALOG,
@@ -186,13 +184,17 @@ static void SetAllowedFileSystems(void)
 			}
 		}
 		break;
+	case BT_GRUB2:
+		allowed_filesystem[FS_EXT2] = TRUE;
+		allowed_filesystem[FS_EXT3] = TRUE;
+		allowed_filesystem[FS_EXT4] = TRUE;
+		// Fall through
 	case BT_SYSLINUX_V6:
 	case BT_GRUB4DOS:
 		allowed_filesystem[FS_NTFS] = TRUE;
 		// Fall through
 	case BT_SYSLINUX_V4:
 	case BT_REACTOS:
-	case BT_GRUB2:
 		allowed_filesystem[FS_FAT16] = TRUE;
 		allowed_filesystem[FS_FAT32] = TRUE;
 		break;
@@ -981,10 +983,9 @@ BOOL CALLBACK LogCallback(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 				log_size = GetDlgItemTextU(hDlg, IDC_LOG_EDIT, log_buffer, log_size);
 				if (log_size != 0) {
 					log_size--;	// remove NUL terminator
-					filepath =  FileDialog(TRUE, app_dir, &log_ext, 0);
-					if (filepath != NULL) {
+					filepath =  FileDialog(TRUE, user_dir, &log_ext, 0);
+					if (filepath != NULL)
 						FileIO(TRUE, filepath, &log_buffer, &log_size);
-					}
 					safe_free(filepath);
 				}
 				safe_free(log_buffer);
@@ -1202,7 +1203,18 @@ out:
 // The scanning process can be blocking for message processing => use a thread
 DWORD WINAPI ImageScanThread(LPVOID param)
 {
-	int i;
+	// Regexp patterns used to match ISO labels for distros whose
+	// maintainers have drunk the "ISOHybrid = DD only" kool aid...
+	const char* dd_koolaid_drinkers[] = {
+		"^CentOS-8-[3-9].*",	// CentOS 8.3 or later
+		"^CentOS-9-.*",			// CentOS 9.x
+		"^OL-.*-BaseOS-.*",		// Oracle Linux
+		"^RHEL-8.[2-9].*",		// Red Hat 8.2 or later
+		"^RHEL-9.*",			// Red Hat 9.x
+		// Don't bother with Fedora for now, even as they use
+		// the same problematic Anaconda...
+	};
+	int i, len;
 	uint8_t arch;
 	char tmp_path[MAX_PATH];
 
@@ -1262,6 +1274,14 @@ DWORD WINAPI ImageScanThread(LPVOID param)
 
 	if (img_report.is_iso) {
 		DisplayISOProps();
+
+		for (i = 0; i < ARRAYSIZE(dd_koolaid_drinkers); i++) {
+			if (re_match(dd_koolaid_drinkers[i], img_report.label, &len) >= 0) {
+				img_report.disable_iso = TRUE;
+				break;
+			}
+		}
+
 		// If we have an ISOHybrid, but without an ISO method we support, disable ISO support altogether
 		if (IS_DD_BOOTABLE(img_report) && (img_report.disable_iso ||
 				(!IS_BIOS_BOOTABLE(img_report) && !IS_EFI_BOOTABLE(img_report)))) {
@@ -1472,7 +1492,7 @@ static DWORD WINAPI BootCheckThread(LPVOID param)
 		if ((partition_type == PARTITION_STYLE_MBR) && (img_report.has_grub2) && (img_report.grub2_version[0] != 0) &&
 			(strcmp(img_report.grub2_version, GRUB2_PACKAGE_VERSION) != 0)) {
 			// We may have to download a different Grub2 version if we can find one
-			IGNORE_RETVAL(_chdirU(app_dir));
+			IGNORE_RETVAL(_chdirU(app_data_dir));
 			IGNORE_RETVAL(_mkdir(FILES_DIR));
 			IGNORE_RETVAL(_chdir(FILES_DIR));
 			static_sprintf(tmp, "%s-%s/%s", grub, img_report.grub2_version, core_img);
@@ -1540,7 +1560,7 @@ static DWORD WINAPI BootCheckThread(LPVOID param)
 
 		if ((partition_type == PARTITION_STYLE_MBR) && HAS_SYSLINUX(img_report)) {
 			if (SL_MAJOR(img_report.sl_version) < 5) {
-				IGNORE_RETVAL(_chdirU(app_dir));
+				IGNORE_RETVAL(_chdirU(app_data_dir));
 				for (i=0; i<NB_OLD_C32; i++) {
 					if (img_report.has_old_c32[i]) {
 						if (!in_files_dir) {
@@ -1576,7 +1596,7 @@ static DWORD WINAPI BootCheckThread(LPVOID param)
 			} else if ((img_report.sl_version != embedded_sl_version[1]) ||
 				(safe_strcmp(img_report.sl_version_ext, embedded_sl_version_ext[1]) != 0)) {
 				// Unlike what was the case for v4 and earlier, Syslinux v5+ versions are INCOMPATIBLE with one another!
-				IGNORE_RETVAL(_chdirU(app_dir));
+				IGNORE_RETVAL(_chdirU(app_data_dir));
 				IGNORE_RETVAL(_mkdir(FILES_DIR));
 				IGNORE_RETVAL(_chdir(FILES_DIR));
 				for (i=0; i<2; i++) {
@@ -1642,7 +1662,7 @@ static DWORD WINAPI BootCheckThread(LPVOID param)
 			}
 		}
 	} else if (boot_type == BT_SYSLINUX_V6) {
-		IGNORE_RETVAL(_chdirU(app_dir));
+		IGNORE_RETVAL(_chdirU(app_data_dir));
 		IGNORE_RETVAL(_mkdir(FILES_DIR));
 		IGNORE_RETVAL(_chdir(FILES_DIR));
 		static_sprintf(tmp, "%s-%s/%s.%s", syslinux, embedded_sl_version_str[1], ldlinux, ldlinux_ext[2]);
@@ -1675,7 +1695,7 @@ static DWORD WINAPI BootCheckThread(LPVOID param)
 			goto out;
 		}
 	} else if (boot_type == BT_GRUB4DOS) {
-		IGNORE_RETVAL(_chdirU(app_dir));
+		IGNORE_RETVAL(_chdirU(app_data_dir));
 		IGNORE_RETVAL(_mkdir(FILES_DIR));
 		IGNORE_RETVAL(_chdir(FILES_DIR));
 		static_sprintf(tmp, "grub4dos-%s/grldr", GRUB4DOS_VERSION);
@@ -2129,8 +2149,9 @@ static INT_PTR CALLBACK MainCallback(HWND hDlg, UINT message, WPARAM wParam, LPA
 	RECT rc, DialogRect, DesktopRect;
 	HDC hDC;
 	PAINTSTRUCT ps;
+	DWORD log_size;
 	int nDeviceIndex, i, nWidth, nHeight, nb_devices, selected_language, offset, tb_state, tb_flags;
-	char tmp[128];
+	char tmp[MAX_PATH], *log_buffer = NULL;
 	wchar_t* wbuffer = NULL;
 	loc_cmd* lcmd = NULL;
 	wchar_t wtooltip[128];
@@ -2193,6 +2214,18 @@ static INT_PTR CALLBACK MainCallback(HWND hDlg, UINT message, WPARAM wParam, LPA
 				EnableWindow(GetDlgItem(hDlg, IDCANCEL), TRUE);
 				return (INT_PTR)TRUE;
 			}
+
+			// Save the current log to %LocalAppData%\Rufus\rufus.log
+			log_size = GetWindowTextLengthU(hLog);
+			if ((log_size > 0) && ((log_buffer = (char*)malloc(log_size)) != NULL)) {
+				log_size = GetDlgItemTextU(hLogDialog, IDC_LOG_EDIT, log_buffer, log_size);
+				if (log_size-- > 1) {
+					static_sprintf(tmp, "%s\\%s\\rufus.log", app_data_dir, FILES_DIR);
+					FileIO(TRUE, tmp, &log_buffer, &log_size);
+				}
+				safe_free(log_buffer);
+			}
+
 			if (ulRegister != 0)
 				SHChangeNotifyDeregister(ulRegister);
 			PostQuitMessage(0);
@@ -2320,14 +2353,14 @@ static INT_PTR CALLBACK MainCallback(HWND hDlg, UINT message, WPARAM wParam, LPA
 				persistence_size = lPos * MB;
 				for (i = 0; i < persistence_unit_selection; i++)
 					persistence_size *= 1024;
-				if (persistence_size > SelectedDrive.DiskSize - img_report.projected_size)
-					persistence_size = SelectedDrive.DiskSize - img_report.projected_size;
+				if (persistence_size > SelectedDrive.DiskSize - PERCENTAGE(PROJECTED_SIZE_RATIO, img_report.projected_size))
+					persistence_size = SelectedDrive.DiskSize - PERCENTAGE(PROJECTED_SIZE_RATIO, img_report.projected_size);
 				pos = persistence_size / MB;
 				for (i = 0; i < persistence_unit_selection; i++)
 					pos /= 1024;
 				lPos = (LONG)pos;
 				SendMessage(GetDlgItem(hMainDialog, IDC_PERSISTENCE_SLIDER), TBM_SETPOS, TRUE, lPos);
-				if (persistence_size >= (SelectedDrive.DiskSize - img_report.projected_size)) {
+				if (persistence_size >= (SelectedDrive.DiskSize - PERCENTAGE(PROJECTED_SIZE_RATIO, img_report.projected_size))) {
 					static_sprintf(tmp, "%ld", lPos);
 					app_changed_size = TRUE;
 					SetWindowTextU(GetDlgItem(hMainDialog, IDC_PERSISTENCE_SIZE), tmp);
@@ -2447,7 +2480,7 @@ static INT_PTR CALLBACK MainCallback(HWND hDlg, UINT message, WPARAM wParam, LPA
 				} else {
 					char* old_image_path = image_path;
 					// If declared globaly, lmprintf(MSG_036) would be called on each message...
-					EXT_DECL(img_ext, NULL, __VA_GROUP__("*.iso;*.img;*.vhd;*.usb;*.bz2;*.bzip2;*.gz;*.lzma;*.xz;*.Z;*.zip;*.wim;*.esd"),
+					EXT_DECL(img_ext, NULL, __VA_GROUP__("*.iso;*.img;*.vhd;*.usb;*.bz2;*.bzip2;*.gz;*.lzma;*.xz;*.Z;*.zip;*.wim;*.esd;*.vtsi"),
 						__VA_GROUP__(lmprintf(MSG_036)));
 					image_path = FileDialog(FALSE, NULL, &img_ext, 0);
 					if (image_path == NULL) {
@@ -2811,9 +2844,8 @@ static INT_PTR CALLBACK MainCallback(HWND hDlg, UINT message, WPARAM wParam, LPA
 	case WM_CLIENTSHUTDOWN:
 	case WM_QUERYENDSESSION:
 	case WM_ENDSESSION:
-		if (op_in_progress) {
+		if (op_in_progress)
 			return (INT_PTR)TRUE;
-		}
 		if (message == WM_CLOSE) {
 			// We must use PostQuitMessage() on WM_CLOSE, to prevent notification sound...
 			PostQuitMessage(0);
@@ -2991,7 +3023,7 @@ static INT_PTR CALLBACK MainCallback(HWND hDlg, UINT message, WPARAM wParam, LPA
 							for (i = 0; i < ARRAYSIZE(ps_cmd); i++) {
 								// Run the PowerShell commands
 								static_sprintf(cmdline, "%s -NonInteractive -NoProfile -Command %s", tmp, ps_cmd[i]);
-								if (RunCommand(cmdline, app_dir, TRUE) != 1)
+								if (RunCommand(cmdline, app_data_dir, TRUE) != 1)
 									break;
 							}
 							if (i == ARRAYSIZE(ps_cmd)) {
@@ -3105,7 +3137,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	BOOL disable_hogger = FALSE, previous_enable_HDDs = FALSE, vc = IsRegistryNode(REGKEY_HKCU, vs_reg);
 	BOOL alt_pressed = FALSE, alt_command = FALSE;
 	BYTE *loc_data;
-	DWORD loc_size, u, size = sizeof(u);
+	DWORD loc_size, u = 0, size = sizeof(u);
 	char tmp_path[MAX_PATH] = "", loc_file[MAX_PATH] = "", ini_path[MAX_PATH] = "", ini_flags[] = "rb";
 	char *tmp, *locale_name = NULL, **argv = NULL;
 	wchar_t **wenv, **wargv;
@@ -3163,6 +3195,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 		uprintf("Could not get current directory: %s", WindowsErrorString());
 		app_dir[0] = 0;
 	}
+	// Microsoft has a bad habit of making some of its APIs (_chdir/_wchdir) break
+	// when app_dir is a drive letter that doesn't have a trailing backslash. For
+	// instance _chdir("F:") does not change the directory, whereas _chdir("F:\\")
+	// does. So make sure we add a trailing backslash if the app_dir is a drive.
+	if ((app_dir[1] == ':') && (app_dir[2] == 0)) {
+		app_dir[2] = '\\';
+		app_dir[3] = 0;
+	}
 	if (GetSystemDirectoryU(system_dir, sizeof(system_dir)) == 0) {
 		uprintf("Could not get system directory: %s", WindowsErrorString());
 		static_strcpy(system_dir, "C:\\Windows\\System32");
@@ -3170,6 +3210,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	if (GetTempPathU(sizeof(temp_dir), temp_dir) == 0) {
 		uprintf("Could not get temp directory: %s", WindowsErrorString());
 		static_strcpy(temp_dir, ".\\");
+	}
+	if (!SHGetSpecialFolderPathU(NULL, app_data_dir, CSIDL_LOCAL_APPDATA, FALSE)) {
+		uprintf("Could not get app data directory: %s", WindowsErrorString());
+		static_strcpy(app_data_dir, temp_dir);
+	}
+	if (!SHGetSpecialFolderPathU(NULL, user_dir, CSIDL_PROFILE, FALSE)) {
+		uprintf("Could not get user directory: %s", WindowsErrorString());
+		static_strcpy(user_dir, temp_dir);
 	}
 	// Construct Sysnative ourselves as there is no GetSysnativeDirectory() call
 	// By default (64bit app running on 64 bit OS or 32 bit app running on 32 bit OS)
@@ -3186,13 +3234,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	}
 #endif
 
-#if (SOLUTION == appstore)
-	appstore_version = TRUE;
-	for (i = 0; i < ARRAYSIZE(appstore_chunk); i++)
-		if (strstr(app_dir, appstore_chunk[0]) == NULL)
-			goto out;
-	goto skip_args_processing;
-#endif
+	// Look for a rufus.app file in the current app directory
+	// Since Microsoft makes it downright impossible to pass an arg in the app manifest
+	// and the automated VS2019 package building process doesn't like renaming the .exe
+	// right under its nose (else we would use the same trick as for portable vs regular)
+	// we use yet another workaround to detect if we are running the AppStore version...
+	static_sprintf(ini_path, "%s\\rufus.app", app_dir);
+	if (PathFileExistsU(ini_path)) {
+		appstore_version = TRUE;
+		goto skip_args_processing;
+	}
 
 	// We have to process the arguments before we acquire the lock and process the locale
 	PF_INIT(__wgetmainargs, Msvcrt);
@@ -3315,7 +3366,7 @@ skip_args_processing:
 	static_sprintf(ini_path, "%s\\rufus.ini", app_dir);
 	fd = fopenU(ini_path, ini_flags);	// Will create the file if portable mode is requested
 	// Using the string directly in safe_strcmp() would call GetSignatureName() twice
-	tmp = GetSignatureName(NULL, NULL);
+	tmp = GetSignatureName(NULL, NULL, FALSE);
 	vc |= (safe_strcmp(tmp, cert_name[0]) == 0);
 	if (fd != NULL) {
 		ini_file = ini_path;
@@ -3620,7 +3671,7 @@ relaunch:
 			}
 			// Alt-D => Delete the 'rufus_files' subdirectory
 			if ((msg.message == WM_SYSKEYDOWN) && (msg.wParam == 'D')) {
-				static_sprintf(tmp_path, "%s\\%s", app_dir, FILES_DIR);
+				static_sprintf(tmp_path, "%s\\%s", app_data_dir, FILES_DIR);
 				PrintStatus(STATUS_MSG_TIMEOUT, MSG_264, tmp_path);
 				SHDeleteDirectoryExU(NULL, tmp_path, FOF_SILENT | FOF_NOERRORUI | FOF_NOCONFIRMATION);
 				continue;
